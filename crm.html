@@ -1166,7 +1166,7 @@
       </div>
       <div style="margin-top:12px;"><span class="status-dot off" id="connStatus"></span><span id="connText">Backend: not configured</span></div>
       <div style="margin-top:8px;">Data persists to your Google Sheet via Apps Script.</div>
-      <div style="margin-top:10px; padding-top:10px; border-top:1px solid rgba(244,241,234,0.06); font-family:'Geist Mono', monospace; font-size:10px; opacity:0.4;">CertifiedIQ CRM <span id="versionStamp">v9.4.1</span></div>
+      <div style="margin-top:10px; padding-top:10px; border-top:1px solid rgba(244,241,234,0.12); font-family:'Geist Mono', monospace; font-size:12px; opacity:0.9;">CertifiedIQ CRM <span id="versionStamp" style="color:var(--accent); font-weight:600;">v9.4.3</span></div>
       <div style="margin-top:10px; padding-top:10px; border-top:1px solid rgba(244,241,234,0.06);">
         <a href="https://github.com/dosca61/certifiediq-tools/blob/main/README.md" target="_blank" style="font-size:11px; color:rgba(244,241,234,0.6); text-decoration:none; display:inline-flex; align-items:center; gap:4px;">📖 Manual</a>
       </div>
@@ -1199,7 +1199,7 @@ const BACKEND_URL = 'https://script.google.com/macros/s/AKfycbxlTG02N2FOM9Vo2kt4
    ============================================================ */
 // Version stamp — shown in the sidebar foot. Bump on every release so the user
 // can tell at a glance which build they're on without diffing files.
-const VERSION = 'v9.4.1';
+const VERSION = 'v9.4.3';
 
 const STATE = {
   leads: [],
@@ -1441,6 +1441,7 @@ const SECTORS = [
   'Homecare & Residential Care — HIQA',
   'Licensed Road Transport — CPC / RSA / ADR',
   'Construction — CIF / HSA',
+  'H&S Consultants — Referral Partners',
   // Adjacent / generic
   'Manufacturing', 'Logistics', 'Healthcare', 'Hospitality',
   'Retail / E-commerce', 'Professional Services', 'Other'
@@ -1551,7 +1552,30 @@ TECHNICAL CASE (Quality/H&S Manager):
 - Site-safety corpus: working at height, confined space, lifting ops, manual handling, PPE, fire safety, LOTO in Polish, Romanian, Lithuanian, Portuguese
 - Site-specific induction in worker's first language — closes the Safe Pass / actual-hazards gap
 - Digital toolbox-talk evidence — per worker, per topic, geo-stamped — defensible to HSA and main contractor
-- Subcontractor management — require CertifiedIQ evidence as condition of site access`
+- Subcontractor management — require CertifiedIQ evidence as condition of site access`,
+
+    'H&S Consultants — Referral Partners':
+`TARGET: Independent H&S consultants, food safety advisors, and small consultancy practices (1-10 people) serving Irish SMEs in food, care, transport and construction. Decision-maker: the principal/owner. NOTE: this is a PARTNER RECRUITMENT motion, not an end-customer sale — the pitch is "earn recurring revenue by prescribing CertifiedIQ to your clients", not "buy training".
+
+THE PROBLEM (theirs): Consultants get paid for audits, docs and one-off training days — then walk away. When a client's multilingual floor fails a comprehension check at inspection, the consultant wears the reputational damage but had no tool to prevent it. They currently have nothing to recommend that proves comprehension in Polish, Romanian, Lithuanian or Portuguese.
+
+WHY THEY REFER:
+- Recurring revenue share on every client site they sign (do NOT state a specific commission percentage in any outreach — terms are discussed on the call)
+- Closes the language-gap liability in their own recommendations — they can now prescribe a fix, not just flag the risk
+- Stickier client relationships: the CertifiedIQ dashboard gives the consultant an ongoing monitoring role between visits
+- Zero delivery burden: platform is self-serve, CertifiedIQ handles onboarding and support
+
+COMMERCIAL CASE (for the consultant):
+- A typical client roster of 20-40 SMEs contains 5-10 sites with a multilingual floor — each is a referral
+- One avoided FSAI closure or HIQA finding protects the consultant's flagship reference client
+- Differentiates their audit offer: "comprehension-proofed training" is a line no competing consultant can currently match
+
+TECHNICAL CASE (what they are prescribing):
+- Per-learner, per-module comprehension scores, geo- and time-stamped — inspection-grade evidence for FSAI, HIQA, HSA, RSA
+- Validated corpora in Polish, Romanian, Lithuanian, Portuguese — not machine translation
+- Consultant gets read access to client dashboards for ongoing compliance monitoring
+
+OUTREACH ANGLE: Lead with THEIR client risk and THEIR recurring revenue, never with product features. CTA: 15-min partner call. Never invent client names, commission figures, or endorsements.`
   }
 };
 
@@ -1596,9 +1620,16 @@ function migrateLeadValues() {
     if (l.status === 'BANTA') { l.status = 'BANT'; changed = true; }
     if (Array.isArray(l.stageHistory)) l.stageHistory.forEach(h => { if (h.stage === 'BANTA') { h.stage = 'BANT'; changed = true; } });
   });
+  // v9.4.2: inject the H&S consultant referral-partner brief into playbooks saved before it existed
+  if (STATE.config && STATE.config.playbook && STATE.config.playbook.sectors &&
+      !STATE.config.playbook.sectors['H&S Consultants — Referral Partners']) {
+    STATE.config.playbook.sectors['H&S Consultants — Referral Partners'] =
+      DEFAULT_PLAYBOOK.sectors['H&S Consultants — Referral Partners'];
+    changed = true;
+  }
   // v9.4.1: playbook primary contact corrected (old Grafton address)
-  if (STATE.playbook && STATE.playbook.primaryContact === 'malcolm@thegrafton.com') {
-    STATE.playbook.primaryContact = 'donal@quantumbuild.ai';
+  if (STATE.config && STATE.config.playbook && STATE.config.playbook.primaryContact === 'malcolm@thegrafton.com') {
+    STATE.config.playbook.primaryContact = 'donal@quantumbuild.ai';
     changed = true;
   }
   if (changed) saveLocal();
@@ -2146,7 +2177,7 @@ function renderDashboard() {
   return `
     <div class="page-head">
       <div>
-        <h1 class="page-title">Good <em>day</em>${STATE.currentUser ? `, ${escapeHtml(STATE.currentUser)}`: ''}.</h1>
+        <h1 class="page-title">Good <em>day</em>${STATE.currentUser ? `, ${escapeHtml(STATE.currentUser)}`: ''}. <span class="pill mono" style="vertical-align:middle; font-size:11px;" title="Deployed build version">${VERSION}</span></h1>
         <p class="page-sub">Your pipeline at a glance — generated, researched, and tracked from first touch to close.</p>
       </div>
       <div class="page-actions">
