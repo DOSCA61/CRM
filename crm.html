@@ -1166,7 +1166,7 @@
       </div>
       <div style="margin-top:12px;"><span class="status-dot off" id="connStatus"></span><span id="connText">Backend: not configured</span></div>
       <div style="margin-top:8px;">Data persists to your Google Sheet via Apps Script.</div>
-      <div style="margin-top:10px; padding-top:10px; border-top:1px solid rgba(244,241,234,0.12); font-family:'Geist Mono', monospace; font-size:12px; opacity:0.9;">CertifiedIQ CRM <span id="versionStamp" style="color:var(--accent); font-weight:600;">v9.4.3</span></div>
+      <div style="margin-top:10px; padding-top:10px; border-top:1px solid rgba(244,241,234,0.12); font-family:'Geist Mono', monospace; font-size:12px; opacity:0.9;">CertifiedIQ CRM <span id="versionStamp" style="color:var(--accent); font-weight:600;">v9.5.0</span></div>
       <div style="margin-top:10px; padding-top:10px; border-top:1px solid rgba(244,241,234,0.06);">
         <a href="https://github.com/dosca61/certifiediq-tools/blob/main/README.md" target="_blank" style="font-size:11px; color:rgba(244,241,234,0.6); text-decoration:none; display:inline-flex; align-items:center; gap:4px;">📖 Manual</a>
       </div>
@@ -1199,7 +1199,7 @@ const BACKEND_URL = 'https://script.google.com/macros/s/AKfycbxlTG02N2FOM9Vo2kt4
    ============================================================ */
 // Version stamp — shown in the sidebar foot. Bump on every release so the user
 // can tell at a glance which build they're on without diffing files.
-const VERSION = 'v9.4.3';
+const VERSION = 'v9.5.0';
 
 const STATE = {
   leads: [],
@@ -2994,6 +2994,8 @@ function renderLeadDetail() {
 
         ${renderOutreachCard(lead)}
 
+        ${renderLinkedInCard(lead)}
+
         <div class="card" style="margin-top:24px;">
           <div class="card-head">
             <div>
@@ -3309,6 +3311,87 @@ async function pushOutreachToGmail(leadId, i) {
     await backendCall('createGmailDraft', { to: lead.email, subject: em.subject || '', body: em.body || '' });
     toast('Draft created in Gmail — review and send', 'success');
   } catch (e) { toast(e.message, 'error'); }
+}
+
+/* ============================================================
+   LINKEDIN DRAFTER (v9.5.0)
+   Connection note + opening message + follow-up, copy-paste only.
+   No LinkedIn API, no OAuth — the human sends every message.
+   ============================================================ */
+function renderLinkedInCard(lead) {
+  const li = lead.linkedin && typeof lead.linkedin === 'object' ? lead.linkedin : null;
+  const searchName = [lead.contactName, lead.companyName].filter(Boolean).join(' ') || lead.companyName || '';
+  const searchUrl = 'https://www.linkedin.com/search/results/people/?keywords=' + encodeURIComponent(searchName);
+  return `
+    <div class="card" style="margin-top:24px;">
+      <div class="card-head">
+        <div>
+          <div class="card-title">LinkedIn outreach</div>
+          <div class="card-sub">${li ? 'Connection note + opening message + follow-up \u2014 copy, paste, send yourself' : 'AI-drafted connection note and messages from the playbook \u2014 no automation, you send'}</div>
+        </div>
+        <div style="display:flex; gap:8px;">
+          ${searchName ? `<a class="btn btn-ghost" href="${searchUrl}" target="_blank" rel="noopener">Find on LinkedIn \u2197</a>` : ''}
+          <button class="btn btn-accent" onclick="draftLinkedIn('${lead.id}')">${li ? '\u21bb Regenerate' : '\ud83d\udcbc Draft LinkedIn'}</button>
+        </div>
+      </div>
+      ${!li
+        ? `<div class="empty"><div class="serif">Nothing drafted yet</div><div>Generates a \u2264300-character connection note, an opening message for after they accept, and a follow-up.</div></div>`
+        : renderLinkedInPart('Connection note', 'connectionNote', li.connectionNote, lead.id, li.connectionNote ? li.connectionNote.length + ' / 300 chars' : '')
+        + renderLinkedInPart('Opening message \u00b7 after they accept', 'openingMessage', li.openingMessage, lead.id, '')
+        + renderLinkedInPart('Follow-up \u00b7 ~5 days, no reply', 'followUp', li.followUp, lead.id, '')}
+    </div>`;
+}
+
+function renderLinkedInPart(label, key, text, leadId, meta) {
+  if (!text) return '';
+  return `
+    <div style="padding:16px 0; border-bottom:1px solid var(--line-soft);">
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:10px; flex-wrap:wrap;">
+        <div><span class="pill">${label}</span>${meta ? `<span style="margin-left:8px; font-size:11px; opacity:0.6;">${meta}</span>` : ''}</div>
+        <button class="btn btn-ghost" onclick="copyLinkedInPart('${leadId}', '${key}')">Copy</button>
+      </div>
+      <div style="margin-top:10px; font-size:13px; line-height:1.7; color:var(--ink-soft); white-space:pre-wrap;">${escapeHtml(text)}</div>
+    </div>`;
+}
+
+async function draftLinkedIn(leadId) {
+  const lead = STATE.leads.find(l => l.id === leadId);
+  if (!lead) return;
+  toast('Drafting the LinkedIn messages\u2026');
+  try {
+    const lastCall = STATE.calls.filter(c => c.leadId === lead.id).sort((a, b) => new Date(b.date) - new Date(a.date))[0];
+    const data = await backendCall('draftLinkedIn', {
+      companyName: lead.companyName,
+      contactName: lead.contactName,
+      title: lead.title,
+      sector: lead.sector,
+      size: lead.size,
+      status: lead.status,
+      pitch: lead.pitch,
+      notes: lead.notes,
+      lastCallSummary: lastCall ? (lastCall.summary || '') : '',
+      lastCallObjections: lastCall ? (lastCall.objections || []) : [],
+      lastCallCta: lastCall ? (lastCall.cta || '') : '',
+      companyContext: buildAIContext(),
+      sectorBrief: sectorBrief(lead.sector)
+    });
+    lead.linkedin = data.linkedin || null;
+    lead.updated = new Date().toISOString();
+    saveLocal();
+    await pushLead(lead);
+    toast('LinkedIn messages ready \u2014 copy and send from your own account', 'success');
+    render();
+  } catch (e) { toast(e.message, 'error'); }
+}
+
+function copyLinkedInPart(leadId, key) {
+  const lead = STATE.leads.find(l => l.id === leadId);
+  const li = lead && lead.linkedin && typeof lead.linkedin === 'object' ? lead.linkedin : null;
+  const text = li ? (li[key] || '') : '';
+  if (!text) { toast('Nothing to copy', 'error'); return; }
+  navigator.clipboard.writeText(text)
+    .then(() => toast('Copied \u2014 paste into LinkedIn', 'success'))
+    .catch(() => toast('Copy failed', 'error'));
 }
 
 async function runPipelineReview() {
