@@ -1211,6 +1211,7 @@ const STATE = {
   _pipelineView: 'kanban',    // 'kanban' (default) or 'timeline'
   _showUnqualified: false,    // Pipeline: reveal Initial Contact + BANT leads
   _leadOwnerFilter: 'all',    // 'all' | 'mine' on Leads page
+  _leadTagFilter: 'all',      // 'all' | a tag name — Leads page tag filter
   _qualOwnerFilter: 'all',    // 'all' | 'mine' on Qualification page
   _activityFilter: 'all',     // 'all' | 'stage' | 'owner' | 'delete' | 'create'
   _followupOwnerFilter: 'all',// 'all' | 'mine' on Follow-ups page
@@ -1616,6 +1617,7 @@ function migrateLeadValues() {
   let changed = false;
   STATE.leads.forEach(l => {
     if (l.value === undefined || l.value === null || l.value === '') { l.value = DEFAULT_LEAD_VALUE; changed = true; }
+    if (!Array.isArray(l.tags)) { l.tags = []; changed = true; }
     // v9.4.1: stage renamed BANTA -> BANT; migrate stored statuses + history
     if (l.status === 'BANTA') { l.status = 'BANT'; changed = true; }
     if (Array.isArray(l.stageHistory)) l.stageHistory.forEach(h => { if (h.stage === 'BANTA') { h.stage = 'BANT'; changed = true; } });
@@ -2067,6 +2069,10 @@ function openAddLeadModal() {
           <label class="label">Notes / context for AI</label>
           <textarea class="textarea" id="addLeadNotes" placeholder="How you met them, what they care about, any signals from the conversation…"></textarea>
         </div>
+        <div class="form-row">
+          <label class="label">Tags <span style="font-weight:400; color:var(--ink-muted);">— comma-separated (e.g. Wexford Chamber, AI Readiness)</span></label>
+          <input class="input" id="addLeadTags" placeholder="Wexford Chamber, Process Mapping"/>
+        </div>
         <div class="checkbox-row">
           <input type="checkbox" id="addLeadGenPitch" checked/>
           <label for="addLeadGenPitch" style="font-size:13px; color:var(--ink-soft);">Auto-generate elevator pitch after save (uses AI, ~3 sec)</label>
@@ -2099,6 +2105,7 @@ async function saveManualLead() {
     status: 'Initial Contact',
     value: DEFAULT_LEAD_VALUE,
     notes: document.getElementById('addLeadNotes').value.trim(),
+    tags: (document.getElementById('addLeadTags')?.value || '').split(',').map(t => t.trim()).filter(Boolean),
     owner: document.getElementById('addLeadOwner').value,
     createdBy: STATE.currentUser,
     lastModifiedBy: STATE.currentUser,
@@ -2122,6 +2129,87 @@ async function saveManualLead() {
     setTimeout(() => regeneratePitch(lead.id), 200);
   }
 }
+/* ============================================================
+   WEXFORD CHAMBER IMPORT — one-click seed of Hot & Warm targets
+   (County Wexford Chamber contact list). Idempotent: skips any
+   company already present. Each lead is pre-tagged so you can
+   filter the Leads page by "Wexford Chamber", by product fit,
+   or by "Hot"/"Warm".
+   ============================================================ */
+const WEXFORD_CHAMBER_LEADS = [
+  {c:"Organisational Excellence Ireland (OEI)", n:"Liam O'Connor", t:"Managing Director", sec:"H&S Consultants — Referral Partners", sz:"1-10", web:"https://oeirl.com", prod:"Process Mapping", pri:"Hot", sum:"Business consultancy (Chapwex Ltd) — quality, safety, lean, environmental & ISO management systems, certification and training for regulated industries."},
+  {c:"JMCrocker", n:"Jess McKenzie-Crocker", t:"Founder / Workflow Specialist", sec:"Professional Services", sz:"1-10", web:"", prod:"Process Mapping", pri:"Hot", sum:"Independent Workflow Specialist helping businesses streamline and automate operational processes. (No public website found — LinkedIn only.)"},
+  {c:"Watt Footprint Ltd", n:"Kevin Butler", t:"Senior Energy Engineer", sec:"Professional Services", sz:"1-10", web:"https://wattfootprint.com", prod:"Process Mapping", pri:"Warm", sum:"Energy-management engineering — energy audits, monitoring, grant acquisition and project management to cut business energy costs."},
+  {c:"ASL Safety & Training Ltd", n:"Mark Corcoran", t:"Managing Director", sec:"H&S Consultants — Referral Partners", sz:"11-50", web:"https://aslsafety.com", prod:"Process Mapping", pri:"Warm", sum:"Workplace health & safety consultancy — risk assessments, audits and accredited safety/security training (centre in Ardcavan, Wexford)."},
+  {c:"Southern Fire Safety Ltd", n:"Denise Feeney", t:"Director", sec:"Professional Services", sz:"11-50", web:"https://www.southernfiresafety.ie", prod:"Process Mapping", pri:"Warm", sum:"Fire safety — sale, installation, servicing and certification of extinguishers, alarms, suppression systems, emergency lighting plus training."},
+  {c:"McGrath Quantity Surveyors", n:"John Casey", t:"COO", sec:"Construction — CIF / HSA", sz:"11-50", web:"https://www.mccqs.ie", prod:"Process Mapping", pri:"Warm", sum:"Quantity surveying / construction cost consultancy (Enniscorthy) across housing, commercial and public-sector projects."},
+  {c:"People Solutions Ltd.", n:"Joe Rowe", t:"Director", sec:"Professional Services", sz:"11-50", web:"https://peoplesolutions.ie", prod:"Micro App", pri:"Warm", sum:"Recruitment & staffing agency (Enniscorthy) — permanent, temporary and overseas recruitment across the South-East."},
+  {c:"South East Finishing Ltd", n:"Michael Higgins", t:"Director", sec:"Manufacturing", sz:"11-50", web:"", prod:"Process Mapping", pri:"Warm", sum:"Industrial surface-finishing / manufacturing services (blasting, coating). (No public website found.)"},
+  {c:"O'Leary Sludds Architects (OLS)", n:"Robert Cullen", t:"Technical Director", sec:"Construction — CIF / HSA", sz:"11-50", web:"https://olsarchitects.ie", prod:"Process Mapping", pri:"Warm", sum:"RIAI-registered architectural practice (Wexford & Dublin) — education, residential, commercial, conservation and Passive House."},
+  {c:"Caulfield Financial Ltd", n:"Aoife Caulfield", t:"CEO", sec:"Professional Services", sz:"1-10", web:"https://caulfieldfinancial.ie", prod:"AI Readiness", pri:"Warm", sum:"Family-run financial-services firm (Barntown) — life insurance, pensions, income protection, investments and wealth management."},
+  {c:"iCare Brokers Ltd", n:"Sarah Murphy", t:"Commercial Account Executive", sec:"Professional Services", sz:"1-10", web:"https://icarebrokers.ie", prod:"Micro App", pri:"Warm", sum:"Insurance brokerage — commercial and personal cover (property, motor, travel, business)."},
+  {c:"Think Differently", n:"Viv Maher", t:"Founder", sec:"Professional Services", sz:"1-10", web:"https://thinkdifferently.ie", prod:"AI Readiness", pri:"Warm", sum:"Recruitment consultancy & career coaching (Curracloe) for the marketing and media-communications sector."},
+  {c:"hbs connect", n:"Helmut Burger-Smit", t:"Managing Director", sec:"Professional Services", sz:"1-10", web:"https://hbsconnect.ie", prod:"Partner", pri:"Warm", sum:"Managed-IT company — IT support, managed services and cybersecurity for South-East businesses. IT peer to Richmond IT — treat as partner/reseller channel."},
+  {c:"INNOVATE Skillsource", n:"Chris Vos", t:"Manager", sec:"Professional Services", sz:"11-50", web:"https://innovate.ie", prod:"AI Readiness", pri:"Warm", sum:"IT contracting and tech-talent resourcing — sourcing and placing IT professionals across Ireland/Europe."},
+  {c:"EllaDev Business", n:"Eleanor Devereux", t:"Founder", sec:"Professional Services", sz:"1-10", web:"", prod:"AI Readiness", pri:"Warm", sum:"Digital marketing / social media / digital-strategy consultancy, focused on supporting female-owned businesses. (Network Ireland profile — no dedicated site found.)"},
+  {c:"SellReady", n:"Simmi Duffin", t:"Head of Customer Success", sec:"Professional Services", sz:"11-50", web:"https://sellready.com", prod:"Partner", pri:"Warm", sum:"Property-transaction tech platform (Verifiable Computing Systems Ltd) using AI and blockchain to speed up buying/selling property. Already AI-native — integration/partner conversation."},
+  {c:"Wolfie & Co", n:"Shane Cullen", t:"Co-Owner", sec:"Professional Services", sz:"1-10", web:"https://wolfie.ie", prod:"AI Readiness", pri:"Warm", sum:"Marketing & design agency — branding, web design, print, SEO and social media for SMEs. Possible referral/reseller partner."},
+  {c:"Murphys the Opticians", n:"Alison Murphy", t:"Company Director / Optician", sec:"Healthcare", sz:"1-10", web:"https://www.ajm.ie", prod:"Micro App", pri:"Warm", sum:"Family-run boutique optometry practice on North Main Street, Wexford (est. 1961) — eye tests, eye care and eyewear."},
+  {c:"Gainfort Hair & Beauty Supplies Ltd.", n:"Fiona Gainfort", t:"Director", sec:"Retail / E-commerce", sz:"11-50", web:"https://gainfort.com", prod:"Micro App", pri:"Warm", sum:"Wholesale/retail supplier of professional hair & beauty products to salons and technicians (stores in Wexford & Waterford)."},
+  {c:"Wexford GAA", n:"Patricia Murphy", t:"Accounts/Commercial/Events Coordinator", sec:"Other", sz:"11-50", web:"https://wexfordgaa.ie", prod:"Micro App", pri:"Warm", sum:"County board of the GAA — organising and promoting hurling and football across County Wexford."},
+  {c:"Neville Park Hotels", n:"Philip Erskine", t:"Business Development Manager", sec:"Hospitality", sz:"51-200", web:"https://www.nevillehotels.ie", prod:"Micro App", pri:"Warm", sum:"Family-owned hotel group (Neville Hotels) — Wexford properties including Whites of Wexford and Ravenport Resort."}
+];
+
+function importWexfordChamber() {
+  const existing = new Set(STATE.leads.map(l => (l.companyName||'').trim().toLowerCase()));
+  const now = new Date().toISOString();
+  let added = 0, skipped = 0;
+  const newOnes = [];
+  WEXFORD_CHAMBER_LEADS.forEach(d => {
+    if (existing.has(d.c.trim().toLowerCase())) { skipped++; return; }
+    const lead = {
+      id: uid(),
+      companyName: d.c,
+      contactName: d.n,
+      title: d.t,
+      email: '',
+      phone: '',
+      sector: d.sec,
+      country: 'Ireland',
+      size: d.sz,
+      pitch: '',
+      research: null,
+      status: 'Initial Contact',
+      value: DEFAULT_LEAD_VALUE,
+      notes: (d.web ? d.web + ' — ' : '') + d.sum + '\n\nProduct fit: ' + d.prod + '. Source: County Wexford Chamber contact list.',
+      tags: ['Wexford Chamber', d.prod, d.pri],
+      owner: STATE.currentUser || USERS[0].name,
+      createdBy: STATE.currentUser,
+      lastModifiedBy: STATE.currentUser,
+      lastModifiedAt: now,
+      addedManually: true,
+      created: now,
+      updated: now,
+      stageHistory: [{ stage: 'Initial Contact', date: now, user: STATE.currentUser, note: 'Imported from Wexford Chamber list' }],
+      qualification: {}
+    };
+    ensureQualification(lead);
+    STATE.leads.push(lead);
+    newOnes.push(lead);
+    existing.add(d.c.trim().toLowerCase());
+    added++;
+  });
+  saveLocal();
+  newOnes.forEach(l => { try { pushLead(l); } catch(e){} logChange('create', l.id, 'Imported ' + l.companyName + ' (Wexford Chamber)'); });
+  if (added) {
+    STATE._leadTagFilter = 'Wexford Chamber';
+    toast('Imported ' + added + ' Wexford Chamber lead' + (added>1?'s':'') + (skipped?(' · '+skipped+' already present'):''), 'success');
+  } else {
+    toast('All ' + WEXFORD_CHAMBER_LEADS.length + ' Wexford Chamber leads already imported', 'info');
+  }
+  if (STATE.page === 'leads') render(); else nav('leads');
+}
+
 /* ============================================================
    ROUTER
    ============================================================ */
@@ -2879,15 +2967,19 @@ function renderLeads() {
   const filter = STATE._leadFilter || 'all';
   const ownerFilter = STATE._leadOwnerFilter || 'all';
   const search = STATE._leadSearch || '';
+  const tagFilter = STATE._leadTagFilter || 'all';
+  const allTags = [...new Set(STATE.leads.flatMap(l => Array.isArray(l.tags) ? l.tags : []))].sort((a,b)=>a.localeCompare(b));
   let list = [...STATE.leads];
   if (filter !== 'all') list = list.filter(l => l.status === filter);
   if (ownerFilter === 'mine' && STATE.currentUser) list = list.filter(l => l.owner === STATE.currentUser);
+  if (tagFilter !== 'all') list = list.filter(l => Array.isArray(l.tags) && l.tags.includes(tagFilter));
   if (search) {
     const q = search.toLowerCase();
     list = list.filter(l =>
       (l.companyName||'').toLowerCase().includes(q) ||
       (l.contactName||'').toLowerCase().includes(q) ||
-      (l.sector||'').toLowerCase().includes(q));
+      (l.sector||'').toLowerCase().includes(q) ||
+      (Array.isArray(l.tags) && l.tags.join(' ').toLowerCase().includes(q)));
   }
   list.sort((a,b) => new Date(b.updated||b.created) - new Date(a.updated||a.created));
 
@@ -2900,6 +2992,7 @@ function renderLeads() {
       <div class="page-actions">
         <button class="btn btn-ghost" onclick="syncFromBackend().then(render)">↻ Sync</button>
         <button class="btn btn-ghost" onclick="openAddLeadModal()">+ Add lead</button>
+        <button class="btn btn-ghost" onclick="importWexfordChamber()">+ Import Wexford Chamber</button>
         <button class="btn btn-primary" onclick="nav('generate')">+ Generate</button>
       </div>
     </div>
@@ -2908,6 +3001,10 @@ function renderLeads() {
       <select class="select" id="leadFilter">
         <option value="all" ${filter==='all'?'selected':''}>All statuses</option>
         ${STAGES.map(s => `<option value="${s.key}" ${filter===s.key?'selected':''}>${s.key}</option>`).join('')}
+      </select>
+      <select class="select" id="leadTagFilter">
+        <option value="all" ${tagFilter==='all'?'selected':''}>All tags</option>
+        ${allTags.map(t => `<option value="${escapeHtml(t)}" ${tagFilter===t?'selected':''}>${escapeHtml(t)}</option>`).join('')}
       </select>
       ${STATE.currentUser ? `
         <div class="view-toggle">
@@ -2935,6 +3032,7 @@ function renderLeads() {
               <td>
                 <div class="company">${escapeHtml(l.companyName)}</div>
                 <div class="meta">${escapeHtml(l.country || '')} · ${escapeHtml(l.size || '')}</div>
+                ${(Array.isArray(l.tags) && l.tags.length) ? `<div style="margin-top:5px; display:flex; flex-wrap:wrap; gap:4px;">${l.tags.map(t => `<span style="font-size:10px; padding:2px 7px; border-radius:10px; background:var(--accent-soft); color:var(--accent); border:1px solid var(--accent); white-space:nowrap;">${escapeHtml(t)}</span>`).join('')}</div>` : ''}
               </td>
               <td>
                 <div>${escapeHtml(l.contactName || '—')}</div>
@@ -5251,6 +5349,10 @@ function bindPageEvents() {
     });
     document.getElementById('leadFilter')?.addEventListener('change', e => {
       STATE._leadFilter = e.target.value;
+      render();
+    });
+    document.getElementById('leadTagFilter')?.addEventListener('change', e => {
+      STATE._leadTagFilter = e.target.value;
       render();
     });
   }
